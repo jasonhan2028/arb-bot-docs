@@ -28,10 +28,11 @@ detect
 
 This removes Kalshi preparation from the PM critical path.
 
-![PM critical-path latency](/arb-bot-docs/img/pm_send_latency.png)
+![PM critical-path latency](/img/pm_send_latency.png)
 
 ## Logged latency stages
 
 Execution rows capture detection → execute start, initial book read, limit calculation, final depth analysis, PM preparation, post-PM-preparation revalidation, detection → PM send, PM send → Kalshi preparation start, Kalshi preparation, PM HTTP round trip, PM response → Kalshi send, and Kalshi HTTP round trip.
 
 That makes latency regressions attributable to an exact stage.
+

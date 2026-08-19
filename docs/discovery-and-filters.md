@@ -30,3 +30,4 @@ An opportunity must survive:
 9. post-PM-preparation revalidation.
 
 The filters are treated as **execution safety**, not merely signal selection.
+

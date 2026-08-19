@@ -35,4 +35,5 @@ Kalshi filled 1
 
 Those failures led to PM order verification, exchange-timestamp freshness, automatic recovery, PM-first execution and post-preparation revalidation.
 
-![Execution outcomes](/arb-bot-docs/img/live_execution_outcomes.png)
+![Execution outcomes](/img/live_execution_outcomes.png)
+

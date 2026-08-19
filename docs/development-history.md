@@ -39,10 +39,11 @@ At detection, PM liquidity existed inside the submitted limit, but a Kalshi requ
 
 **Change:** PM-first execution plus post-preparation revalidation.
 
-![PM send latency](/arb-bot-docs/img/pm_send_latency.png)
+![PM send latency](/img/pm_send_latency.png)
 
 ## Phase 5 — PM-first execution
 
 The current design sends PM first, confirms the PM terminal state, and only then sends the Kalshi hedge if it remains executable.
 
 The first three confirmed two-leg PM-first executions were all successful.
+

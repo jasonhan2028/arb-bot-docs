@@ -19,8 +19,9 @@ A score of **3 or 4** is required. At least 100 ms of Kalshi history must exist 
 
 The v14 overnight sample contained 112 logged opportunities. Survival means the original submitted limits remained fillable and the modeled edge remained at least one cent.
 
-![Durability survival curve](/arb-bot-docs/img/durability_survival_curve.png)
+![Durability survival curve](/img/durability_survival_curve.png)
 
 The score improved selection at short horizons but did not make opportunities immune to PM-side changes. That finding motivated later revalidation and PM-first execution.
 
 The score is therefore a **selection feature**, not a substitute for fresh exchange timestamps, exact-limit depth, immediate revalidation, or fail-closed sequencing.
+

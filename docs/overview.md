@@ -46,4 +46,5 @@ The most important current design principle is that **a PM zero fill is a safe a
 
 The PM-first design has produced three consecutive confirmed two-leg executions at one contract. Historical mismatches occurred before this design and directly drove the current execution architecture.
 
-![Live execution outcomes](/arb-bot-docs/img/live_execution_outcomes.png)
+![Live execution outcomes](/img/live_execution_outcomes.png)
+

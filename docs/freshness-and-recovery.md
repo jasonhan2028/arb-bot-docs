@@ -23,3 +23,4 @@ Recovery is bounded by maximum permitted loss per contract, maximum attempts, re
 Per-attempt recovery logging records the observed BBO, recovery limit/floor, whether the BBO crossed the permitted floor, requested quantity, fill quantity, residual quantity, order IDs, and errors.
 
 The bot stops after a mismatch whether recovery succeeds or fails.
+

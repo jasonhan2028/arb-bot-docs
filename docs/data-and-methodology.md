@@ -26,7 +26,7 @@ min(PM cumulative depth inside profitable limit,
     Kalshi cumulative depth inside profitable limit)
 ```
 
-![Recent depth availability](/arb-bot-docs/img/depth_availability.png)
+![Recent depth availability](/img/depth_availability.png)
 
 Displayed depth is not treated as guaranteed future fill. The live strategy revalidates before each order decision.
 
@@ -35,3 +35,4 @@ Displayed depth is not treated as guaranteed future fill. The live strategy reva
 The repository includes a starter `scripts/build_metrics.py` that reads exported CSVs and produces sanitized summary JSON.
 
 Raw credentials, private keys, server addresses, and unsanitized account/order metadata should never be committed to the public site repository.
+
