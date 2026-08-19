@@ -1,0 +1,17 @@
+
+:root {
+  --ifm-color-primary: #3156d3;
+  --ifm-color-primary-dark: #294bc0;
+  --ifm-color-primary-darker: #2747b6;
+  --ifm-color-primary-darkest: #203b96;
+  --ifm-color-primary-light: #4668d8;
+  --ifm-color-primary-lighter: #5070da;
+  --ifm-color-primary-lightest: #728de1;
+  --ifm-code-font-size: 95%;
+}
+.hero--primary { background: linear-gradient(135deg, #17213f 0%, #3156d3 100%); }
+.metricGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:1rem; margin:1.25rem 0 2rem; }
+.metricCard { border:1px solid var(--ifm-color-emphasis-300); border-radius:12px; padding:1rem; background:var(--ifm-background-surface-color); }
+.metricValue { font-size:2rem; font-weight:700; line-height:1.1; }
+.metricLabel { color:var(--ifm-color-emphasis-700); margin-top:.35rem; }
+img { border-radius: 10px; }

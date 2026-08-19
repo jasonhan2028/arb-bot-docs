@@ -1,0 +1,10 @@
+{
+  "current_worker": "v15",
+  "current_launcher": "v8",
+  "execution_sequence": "pm_first_confirm_then_kalshi",
+  "confirmed_pm_first_completions": 3,
+  "historical_pre_pm_first_mismatches": 3,
+  "durability_score_components": 4,
+  "durability_score_minimum": 3,
+  "latest_live_market_cap": 10
+}
