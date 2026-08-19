@@ -24,7 +24,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Generate site data from uploaded CSVs
+      - name: Install metrics dependencies
+        run: python -m pip install pandas matplotlib
+
+      - name: Generate site data from uploaded CSVs and ZIPs
         run: python scripts/build_metrics.py
 
       - uses: actions/setup-node@v4
