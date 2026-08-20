@@ -1,0 +1,2 @@
+started_at_utc,matchup_label,direction,pm_filled_qty,kalshi_filled_qty,status,recovery_status,recovery_residual_qty,recovery_estimated_pnl,failure_reason
+2026-08-20,United Kingdom vs Mexico,Buy YES @ Kalshi + Buy NO @ PM,1,0,mismatch_fully_recovered,fully_recovered,0,-0.03,Kalshi FOK insufficient resting volume
