@@ -9,21 +9,20 @@ The script runs inside GitHub Actions before Docusaurus builds.
 """
 from __future__ import annotations
 
-from csv import DictReader
 from datetime import datetime
-from io import StringIO, TextIOWrapper
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile
 import json
-import math
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = ROOT / "data" / "sanitized" / "live_executions.csv"
+LIVE_BASELINE = ROOT / "data" / "sanitized" / "live_executions.csv"
+FAILURE_BASELINE = ROOT / "data" / "sanitized" / "failures.csv"
 UPLOAD_DIR = ROOT / "data" / "uploads"
 LIVE_DOC = ROOT / "docs" / "live-executions.md"
+FAILURE_DOC = ROOT / "docs" / "failures-and-recovery.md"
 SUMMARY_JSON = ROOT / "static" / "data" / "generated_metrics.json"
 IMG_DIR = ROOT / "static" / "img"
 
@@ -73,7 +72,6 @@ def read_uploaded_frames():
                             print(f"Skipping {path.name}:{member}: {exc}")
             except BadZipFile as exc:
                 print(f"Skipping bad ZIP {path}: {exc}")
-
     return families
 
 
@@ -81,16 +79,22 @@ def concat(frames):
     return pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()
 
 
-def clean_direction(value: str) -> str:
-    value = str(value or "").strip()
+def clean_direction(value) -> str:
+    value = "" if pd.isna(value) else str(value).strip()
     return {
         "Buy YES @ Kalshi + Buy NO @ PM": "Kalshi YES + PM NO",
         "Buy YES @ PM + Buy NO @ Kalshi": "PM YES + Kalshi NO",
     }.get(value, value)
 
 
-def parse_date(value: str) -> str:
-    value = str(value or "").strip()
+def clean_text(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def parse_date(value) -> str:
+    value = clean_text(value)
     if not value:
         return ""
     try:
@@ -104,7 +108,7 @@ def fmt_qty(value) -> str:
         n = float(value)
         return str(int(n)) if n.is_integer() else f"{n:g}"
     except Exception:
-        return str(value or "").strip() or "?"
+        return clean_text(value) or "?"
 
 
 def fmt_edge_cents(value) -> str:
@@ -114,21 +118,30 @@ def fmt_edge_cents(value) -> str:
         return "—"
 
 
+def fmt_money(value) -> str:
+    try:
+        n = float(value)
+        sign = "-" if n < 0 else "+" if n > 0 else ""
+        return f"{sign}${abs(n):.2f}"
+    except Exception:
+        return "—"
+
+
 def baseline_completed_rows():
-    if not BASELINE.exists():
+    if not LIVE_BASELINE.exists():
         return []
-    df = pd.read_csv(BASELINE)
+    df = pd.read_csv(LIVE_BASELINE)
     rows = []
     for _, r in df.iterrows():
         rows.append({
-            "date": str(r.get("date", "")),
-            "market": str(r.get("market", "")),
-            "direction": str(r.get("direction", "")),
+            "date": clean_text(r.get("date", "")),
+            "market": clean_text(r.get("market", "")),
+            "direction": clean_text(r.get("direction", "")),
             "pm_filled_qty": r.get("pm_filled_qty", ""),
             "kalshi_filled_qty": r.get("kalshi_filled_qty", ""),
-            "status": "both_filled" if str(r.get("outcome", "")) == "completed" else str(r.get("outcome", "")),
+            "status": "both_filled" if clean_text(r.get("outcome", "")) == "completed" else clean_text(r.get("outcome", "")),
             "edge": r.get("conservative_realized_edge", ""),
-            "started_at_utc": str(r.get("date", "")),
+            "started_at_utc": clean_text(r.get("date", "")),
         })
     return rows
 
@@ -141,13 +154,13 @@ def execution_completed_rows(execution: pd.DataFrame):
     for _, r in subset.iterrows():
         rows.append({
             "date": parse_date(r.get("started_at_utc", "")),
-            "market": str(r.get("matchup_label", "")).strip(),
+            "market": clean_text(r.get("matchup_label", "")),
             "direction": clean_direction(r.get("direction", "")),
             "pm_filled_qty": r.get("pm_filled_qty", ""),
             "kalshi_filled_qty": r.get("kalshi_filled_qty", ""),
             "status": "both_filled",
             "edge": r.get("conservative_realized_edge", ""),
-            "started_at_utc": str(r.get("started_at_utc", "")).strip(),
+            "started_at_utc": clean_text(r.get("started_at_utc", "")),
         })
     return rows
 
@@ -195,19 +208,168 @@ def build_live_doc(completed, execution):
 
     lines += [
         "", "## Safe aborts", "",
-        "Under PM-first execution, a verified PM zero fill causes the Kalshi order to remain unsent. `pm_no_fill_kalshi_not_sent` rows are safe aborts, not failed arbitrages.",
-        "", "## Historical failures", "",
-        "Before PM-first execution, three live mismatches were observed with the high-level pattern `PM filled 0 / Kalshi filled 1`. Those incidents drove stronger verification, exchange-timestamp freshness, mismatch recovery, PM-first execution and post-preparation revalidation.",
+        "A verified PM zero fill where Kalshi is never sent is a safe abort, not a failed arbitrage.",
+        "", "See **Failures & Recovery** for genuine one-sided execution incidents.",
         "", "![Execution outcomes](/img/live_execution_outcomes.png)", "",
     ]
     LIVE_DOC.write_text("\n".join(lines), encoding="utf-8")
 
 
-def save_execution_outcomes(execution: pd.DataFrame, completed_count: int):
-    safe = int((execution.get("status", pd.Series(dtype=str)).astype(str) == "pm_no_fill_kalshi_not_sent").sum()) if not execution.empty else 0
-    mismatch = int(execution.get("status", pd.Series(dtype=str)).astype(str).isin(["mismatch", "mismatch_recovery_failed", "mismatch_recovered"]).sum()) if not execution.empty else 0
+# ---------- failure ledger ----------
+
+def is_failure_status(status: str) -> bool:
+    s = (status or "").strip().lower()
+    return s.startswith("mismatch") or s in {
+        "recovery_failed",
+        "recovery_residual",
+        "unhedged_stop",
+        "partial_fill_mismatch",
+    }
+
+
+def infer_failure_reason(row) -> str:
+    explicit = clean_text(row.get("failure_reason", ""))
+    if explicit:
+        return explicit
+
+    kal_error = clean_text(row.get("kalshi_error", ""))
+    skip = clean_text(row.get("kalshi_send_skipped_reason", ""))
+    pm_error = clean_text(row.get("pm_error", ""))
+    recovery_error = clean_text(row.get("recovery_error", ""))
+
+    joined = " ".join([kal_error, skip]).lower()
+    if "fill_or_kill_insufficient_resting_volume" in joined or "insufficient resting volume" in joined:
+        return "Kalshi FOK insufficient resting volume"
+    if skip:
+        return skip.replace("_", " ")
+    if kal_error:
+        return "Kalshi hedge error"
+    if pm_error:
+        return "PM execution error"
+    if recovery_error:
+        return "Recovery error"
+    return "One-sided execution mismatch"
+
+
+def normalize_recovery_status(row) -> str:
+    status = clean_text(row.get("status", ""))
+    recovery = clean_text(row.get("recovery_status", ""))
+    residual = clean_text(row.get("recovery_residual_qty", ""))
+
+    if recovery:
+        if recovery == "fully_recovered":
+            return "Fully recovered"
+        if recovery == "recovery_failed":
+            return "Recovery failed"
+        return recovery.replace("_", " ").title()
+    if status == "mismatch_fully_recovered":
+        return "Fully recovered"
+    if status in {"mismatch_recovery_failed", "mismatch_residual"}:
+        return "Unresolved"
+    try:
+        if residual != "" and float(residual) == 0:
+            return "Fully recovered"
+    except Exception:
+        pass
+    return "Unresolved"
+
+
+def baseline_failure_rows():
+    if not FAILURE_BASELINE.exists():
+        return []
+    df = pd.read_csv(FAILURE_BASELINE)
+    return [dict(r) for _, r in df.iterrows()]
+
+
+def uploaded_failure_rows(execution: pd.DataFrame):
+    if execution.empty or "status" not in execution.columns:
+        return []
+    rows = []
+    for _, r in execution.iterrows():
+        status = clean_text(r.get("status", ""))
+        if not is_failure_status(status):
+            continue
+        rows.append({
+            "started_at_utc": clean_text(r.get("started_at_utc", "")),
+            "matchup_label": clean_text(r.get("matchup_label", "")),
+            "direction": clean_direction(r.get("direction", "")),
+            "pm_filled_qty": r.get("pm_filled_qty", ""),
+            "kalshi_filled_qty": r.get("kalshi_filled_qty", ""),
+            "status": status,
+            "recovery_status": clean_text(r.get("recovery_status", "")),
+            "recovery_residual_qty": r.get("recovery_residual_qty", ""),
+            "recovery_estimated_pnl": r.get("recovery_estimated_pnl", ""),
+            "failure_reason": infer_failure_reason(r),
+        })
+    return rows
+
+
+def dedupe_failures(rows):
+    seen = set()
+    out = []
+    for r in sorted(rows, key=lambda x: clean_text(x.get("started_at_utc", "")), reverse=True):
+        key = (
+            parse_date(r.get("started_at_utc", "")),
+            clean_text(r.get("matchup_label", "")),
+            clean_direction(r.get("direction", "")),
+            fmt_qty(r.get("pm_filled_qty", "")),
+            fmt_qty(r.get("kalshi_filled_qty", "")),
+            clean_text(r.get("status", "")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
+def build_failure_doc(failures):
+    lines = [
+        "---", "title: Failures & Recovery", "sidebar_position: 9", "---",
+        "# Failures & Recovery", "",
+        "This ledger contains genuine one-sided execution incidents. Safe PM zero-fill aborts are excluded.", "",
+        "## Incident ledger", "",
+        "| Date | Market | Direction | Fills (PM / Kalshi) | Failure | Recovery | Residual | Recovery P&L |",
+        "|---|---|---|---:|---|---|---:|---:|",
+    ]
+
+    if not failures:
+        lines.append("| — | No recorded mismatches | — | — | — | — | — | — |")
+    else:
+        for r in failures:
+            date = parse_date(r.get("started_at_utc", ""))
+            market = clean_text(r.get("matchup_label", "")) or "—"
+            direction = clean_direction(r.get("direction", "")) or "—"
+            fills = f"{fmt_qty(r.get('pm_filled_qty'))} / {fmt_qty(r.get('kalshi_filled_qty'))}"
+            reason = infer_failure_reason(r)
+            recovery = normalize_recovery_status(r)
+            residual = fmt_qty(r.get("recovery_residual_qty", ""))
+            pnl = fmt_money(r.get("recovery_estimated_pnl", ""))
+            lines.append(f"| {date} | {market} | {direction} | {fills} | {reason} | {recovery} | {residual} | {pnl} |")
+
+    fully_recovered = sum(1 for r in failures if normalize_recovery_status(r) == "Fully recovered")
+    unresolved = len(failures) - fully_recovered
+    lines += [
+        "", f"**Recorded mismatches:** {len(failures)} · **Fully recovered:** {fully_recovered} · **Unresolved:** {unresolved}", "",
+        "## Classification", "",
+        "| Classification | Meaning |",
+        "|---|---|",
+        "| ✅ Completed | Both legs filled as intended |",
+        "| 🟡 Safe abort | PM did not fill and Kalshi was never sent; not included in this ledger |",
+        "| 🟠 Fully recovered mismatch | One leg filled, hedge failed, and automatic recovery reduced residual exposure to zero |",
+        "| 🔴 Unresolved mismatch | Recovery failed or residual exposure remained |",
+        "",
+        "New mismatch rows are added automatically when uploaded execution CSVs or ZIP exports contain a mismatch status.",
+        "",
+    ]
+    FAILURE_DOC.write_text("\n".join(lines), encoding="utf-8")
+
+
+def save_execution_outcomes(execution: pd.DataFrame, completed_count: int, failure_count: int):
+    statuses = execution.get("status", pd.Series(dtype=str)).fillna("").astype(str) if not execution.empty else pd.Series(dtype=str)
+    safe = int((statuses == "pm_no_fill_kalshi_not_sent").sum())
     labels = ["Safe PM aborts", "Completed arbs", "Mismatches"]
-    values = [safe, completed_count, mismatch]
+    values = [safe, completed_count, failure_count]
     fig = plt.figure(figsize=(8.5, 5.0))
     ax = fig.add_subplot(111)
     bars = ax.bar(labels, values)
@@ -222,26 +384,27 @@ def save_execution_outcomes(execution: pd.DataFrame, completed_count: int):
 
 
 def save_pm_latency(execution: pd.DataFrame):
-    needed = {"detected_to_pm_send_call_ms", "status"}
-    if execution.empty or not needed.issubset(execution.columns):
+    latency_col = None
+    for candidate in ["detected_to_pm_send_call_ms", "arb_detected_to_pm_http_send_start_ms"]:
+        if candidate in execution.columns:
+            latency_col = candidate
+            break
+    if execution.empty or latency_col is None or "status" not in execution.columns:
         return
     df = execution.copy()
-    df["lat"] = pd.to_numeric(df["detected_to_pm_send_call_ms"], errors="coerce")
-    df = df[df["lat"].notna() & df["status"].astype(str).isin(["both_filled", "mismatch", "mismatch_recovery_failed", "mismatch_recovered"])]
+    df["lat"] = pd.to_numeric(df[latency_col], errors="coerce")
+    df = df[df["lat"].notna() & df["status"].astype(str).apply(lambda s: s == "both_filled" or is_failure_status(s))]
     if df.empty:
         return
     if "started_at_utc" in df:
         df = df.sort_values("started_at_utc")
     df = df.tail(20)
-    labels = []
-    for i, (_, r) in enumerate(df.iterrows(), 1):
-        status = "success" if str(r.get("status")) == "both_filled" else "mismatch"
-        labels.append(f"{status} {i}")
+    labels = ["success" if str(r.get("status")) == "both_filled" else "mismatch" for _, r in df.iterrows()]
     fig = plt.figure(figsize=(9.5, 5.0))
     ax = fig.add_subplot(111)
-    bars = ax.bar(range(len(df)), df["lat"].tolist())
+    ax.bar(range(len(df)), df["lat"].tolist())
     ax.set_xticks(range(len(df)))
-    ax.set_xticklabels(labels, rotation=35, ha="right")
+    ax.set_xticklabels([f"{label} {i+1}" for i, label in enumerate(labels)], rotation=35, ha="right")
     ax.set_ylabel("Detection → PM HTTP send (ms)")
     ax.set_title("PM Critical-Path Latency")
     ax.grid(True, axis="y", alpha=0.25)
@@ -357,9 +520,12 @@ def main():
     near_miss = concat(families["near_miss"])
 
     completed = dedupe_completed(baseline_completed_rows() + execution_completed_rows(execution))
-    build_live_doc(completed, execution)
+    failures = dedupe_failures(baseline_failure_rows() + uploaded_failure_rows(execution))
 
-    save_execution_outcomes(execution, len(completed))
+    build_live_doc(completed, execution)
+    build_failure_doc(failures)
+
+    save_execution_outcomes(execution, len(completed), len(failures))
     save_pm_latency(execution)
     save_depth_availability(opportunity)
     save_durability_survival(opportunity)
@@ -371,6 +537,8 @@ def main():
     episodes = dedupe_opportunity_episodes(opportunity)
     summary = {
         "confirmed_pm_first_completions": len(completed),
+        "recorded_mismatches": len(failures),
+        "fully_recovered_mismatches": sum(1 for r in failures if normalize_recovery_status(r) == "Fully recovered"),
         "uploaded_execution_rows": int(len(execution)),
         "uploaded_opportunity_rows": int(len(opportunity)),
         "uploaded_near_miss_rows": int(len(near_miss)),
@@ -384,7 +552,8 @@ def main():
     print(f"Opportunity rows: {len(opportunity)}")
     print(f"Near-miss rows: {len(near_miss)}")
     print(f"Completed arbs shown: {len(completed)}")
-    print("Generated live ledger and available dashboard charts")
+    print(f"Mismatches shown: {len(failures)}")
+    print("Generated live ledger, failure ledger, and available dashboard charts")
 
 
 if __name__ == "__main__":
